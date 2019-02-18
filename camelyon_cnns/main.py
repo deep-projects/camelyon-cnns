@@ -6,9 +6,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 import h5py
+import json
+
 import os
 
 from datetime import datetime
+from time import time
 from argparse import ArgumentParser
 from tensorflow import keras
 from sklearn import metrics as metrics
@@ -22,9 +25,7 @@ MODEL_FINAL = './model_final.hdf5'
 GRAPH_ACC = './acc.png'
 GRAPH_LOSS = './loss.png'
 GRAPH_ROC = './roc.png'
-LOG_TRAIN  = './log_training_summary.csv'
-LOG_FINAL_MODEL  = './log_final_model.csv'
-LOG_ARGS  = './log_args.csv'
+LOG  = './log.txt'
 
 
 def main():
@@ -39,14 +40,15 @@ def main():
     BATCHES_PER_TRAIN_EPOCH = 50
     BATCHES_PER_VAL_EPOCH = 50
     EPOCHS = 25
-    MAX_QUEUE_SIZE = 20
+    MAX_QUEUE_SIZE = 100
     L_RATE = 0.0001
-    MASK_THRESHOLD = 0.05
+    MASK_THRESHOLD = 0.1
     NORMALIZATION = 1
+    USE_MULTI_PROCESS = 0
 
 
 
-
+    #'''
     #####################################
     ### Arg Parser
     #####################################
@@ -60,7 +62,7 @@ def main():
         'hdf5', action='store', type=str, metavar='HDF5FILE',
         help='File path to hdf5 file'
     )
-    
+
     parser.add_argument(
         '--arch', action='store', type=str, metavar='HDF5FILE',
         help='Architecture to use. 0=VGG16 (not working yet), 1=InceptionV3, 2=InceptionResNetV2.'
@@ -101,13 +103,17 @@ def main():
         '--color-norm', action='store', type=str, metavar='COLORNORM',
         help='Colornormalization yes/no (1/0)'
     )
+    parser.add_argument(
+        '--multi-process', action='store', type=str, metavar='MULTIPROCESS',
+        help='Parallel batch--generator yes/no (1/0).'
+    )
 
     args = parser.parse_args()
 
     HDF5_FILE = args.hdf5 if args.hdf5 else HDF5_FILE
     if not os.path.isfile(args.hdf5):
         HDF5_FILE = args.hdf5 + '/merged.hdf5'
-        
+
     BATCH_SIZE_NEG = int(args.batch_size_neg) if args.batch_size_pos else BATCH_SIZE_NEG
     BATCH_SIZE_POS = int(args.batch_size_pos) if args.batch_size_pos else BATCH_SIZE_POS
     BATCHES_PER_TRAIN_EPOCH = int(args.batches_train) if args.batches_train else BATCHES_PER_TRAIN_EPOCH
@@ -117,7 +123,10 @@ def main():
     L_RATE = float(args.l_rate) if args.l_rate else L_RATE
     MASK_THRESHOLD = float(args.mask_threshold) if args.mask_threshold else MASK_THRESHOLD
     NORMALIZATION = float(args.color_norm) if args.color_norm else NORMALIZATION
-
+    MODEL_USE = int(args.arch) if args.arch else MODEL_USE
+    USE_MULTI_PROCESS = int(args.multi_process) if args.arch else USE_MULTI_PROCESS
+    #'''
+    
     print('--hdf5', HDF5_FILE)
     print('--arch', MODEL_USE)
     print('--mask-threshold', MASK_THRESHOLD)
@@ -130,6 +139,7 @@ def main():
     print('--l-rate', L_RATE)
     print('--mask-threshold', MASK_THRESHOLD)
     print('--l-color-norm', NORMALIZATION)
+    print('--l-multi-process', USE_MULTI_PROCESS)
 
 
 
@@ -140,7 +150,7 @@ def main():
 
     class TissueDataset():
         """Data set for preprocessed WSIs of the CAMELYON16 and CAMELYON17 data set."""
-            
+
         def __init__(self, path, validationset=False, verbose=False):      
             self.h5 = h5py.File(path, 'r', libver='latest', swmr=True)
             self.tilesize = 224
@@ -167,7 +177,12 @@ def main():
             self.n_normals = len(self.normals)
             if self.verbose: print(self.normals)
             if self.verbose: print(self.tumors)
-        
+            self.get_batch_call_start = []
+            self.get_batch_call_end = []
+            
+        def get_batch_call_times(self):
+            return self.get_batch_call_start, self.get_batch_call_end
+
         def __get_tiles_from_path(self, dataset_names, max_wsis, number_tiles):
             tiles = np.ndarray((number_tiles, self.tilesize, self.tilesize, 3))
             for i in range(number_tiles):
@@ -197,30 +212,31 @@ def main():
                                 trys_to_get_valid_tile = 1337
                                 valid_tile = True
                             trys_to_get_valid_tile += 1
-                
+
             tiles = tiles / 255.
             return tiles
-        
+
         def __get_random_positive_tiles(self, number_tiles):
             if self.verbose: print('getting_tumor_tile')
             return self.__get_tiles_from_path(self.tumors, self.n_tumors, number_tiles), np.ones((number_tiles))
-        
+
         def __get_random_negative_tiles(self, number_tiles):
             if self.verbose: print('getting_normal_tile')
             return self.__get_tiles_from_path(self.normals, self.n_normals, number_tiles), np.zeros((number_tiles))
-        
+
         def generator(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
             while True:
                 x, y = self.get_batch(num_neg, num_pos, data_augm, normalize)
                 yield x, y
 
         def get_batch(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
-            now1 = datetime.now()
+            now1 = time()
+            self.get_batch_call_start.append(now1)
             x_p, y_p = self.__get_random_positive_tiles(num_pos)
             x_n, y_n = self.__get_random_negative_tiles(num_neg)
             x = np.concatenate((x_p, x_n), axis=0)
             y = np.concatenate((y_p, y_n), axis=0)
-            
+
             if data_augm:
                 if np.random.randint(0,2): x = np.flip(x, axis=1)
                 if np.random.randint(0,2): x = np.flip(x, axis=2)
@@ -229,9 +245,10 @@ def main():
                 x[:,:,:,0] = (x[:,:,:,0] - np.mean(x[:,:,:,0])) / np.std(x[:,:,:,0])
                 x[:,:,:,1] = (x[:,:,:,1] - np.mean(x[:,:,:,1])) / np.std(x[:,:,:,1])
                 x[:,:,:,2] = (x[:,:,:,2] - np.mean(x[:,:,:,2])) / np.std(x[:,:,:,2])
-                
+
             p = np.random.permutation(len(y))
-            now2 = datetime.now()
+            now2 = time()
+            self.get_batch_call_end.append(now2)
             BATCH_READ_TIMES.append(now2-now1)
             if self.verbose: print('batch_generator (start, end, diff): ',now1,now2,now2-now1)
             if self.verbose: print('batch: ', x.shape)
@@ -247,11 +264,11 @@ def main():
     print('')
     print('########### Getting one sample batch -verbose')
 
-    train_data = TissueDataset(path=HDF5_FILE, validationset=False, verbose=True)
-    val_data = TissueDataset(path=HDF5_FILE, validationset=True, verbose=True)
+    train_data_tmp = TissueDataset(path=HDF5_FILE, validationset=False, verbose=True)
+    val_data_tmp = TissueDataset(path=HDF5_FILE, validationset=True, verbose=True)
 
 
-    itera = train_data.generator(num_neg=BATCH_SIZE_NEG, num_pos=BATCH_SIZE_POS, data_augm=True, normalize=NORMALIZATION)
+    itera = train_data_tmp.generator(num_neg=BATCH_SIZE_NEG, num_pos=BATCH_SIZE_POS, data_augm=True, normalize=NORMALIZATION)
     #plt.figure(figsize=(12,4))
     #for x, y in itera:
     #    print(x.shape)
@@ -357,16 +374,24 @@ def main():
 
 
     #####################################
-    ### Create callback
+    ### Create callbacks
     #####################################
     cp_callback = tf.keras.callbacks.ModelCheckpoint(MODEL_CHECKPOINT, 
                                                      save_weights_only=True,
                                                      save_best_only=True,
                                                      verbose=1)
 
+    class TimeHistory(keras.callbacks.Callback):
+        def on_train_begin(self, logs={}):
+            self.times = []
 
+        def on_epoch_begin(self, batch, logs={}):
+            self.epoch_time_start = time()
 
-
+        def on_epoch_end(self, batch, logs={}):
+            self.times.append(time() - self.epoch_time_start)
+            
+    time_callback = TimeHistory()
 
 
 
@@ -375,6 +400,8 @@ def main():
     #####################################
     print('')
     print('########### Start real training')
+
+
 
     train_data = TissueDataset(path=HDF5_FILE, validationset=False, verbose=False)
     val_data = TissueDataset(path=HDF5_FILE, validationset=True, verbose=False)
@@ -386,11 +413,16 @@ def main():
             validation_data=val_data.generator(BATCH_SIZE_NEG, BATCH_SIZE_POS, False, NORMALIZATION),
             validation_steps=BATCHES_PER_VAL_EPOCH,
             epochs=EPOCHS,
-            callbacks=[cp_callback], 
+            callbacks=[time_callback, cp_callback], 
             workers=6, 
-            use_multiprocessing=False, 
+            use_multiprocessing=USE_MULTI_PROCESS, 
             max_queue_size=MAX_QUEUE_SIZE)
     now2 = datetime.now()
+
+
+    total_training_time = now2-now1
+    training_get_batch_calls = train_data.get_batch_call_times()
+    validation_get_batch_calls = val_data.get_batch_call_times()
 
 
 
@@ -400,15 +432,9 @@ def main():
     #####################################
     print('')
     print('########### Print Train summary')
+    print(hist.history)
 
-    print('')
-    print('total running time: ', now2 - now1)
-    print('')
-    print('summary metric:')
-    print('acc', hist.history['acc'])
-    print('val_acc', hist.history['val_acc'])
-    print('loss', hist.history['loss'])
-    print('val_loss', hist.history['val_loss'])
+
 
 
 
@@ -459,7 +485,7 @@ def main():
 
     cm_train = metrics.confusion_matrix(y_train, preds_train)
     cm_val = metrics.confusion_matrix(y_val, preds_val)
-        
+
     TP_train = cm_train[1,1]
     TN_train = cm_train[0,0]
     FP_train = cm_train[0,1]
@@ -468,16 +494,19 @@ def main():
     TN_val = cm_val[0,0]
     FP_val = cm_val[0,1]
     FN_val = cm_val[1,0]
-    final_acc_train = (TP_val + TN_val) / (FN_val + FP_val + TP_val + TN_val)
-    final_acc_val = (TP_val + TN_val) / (FN_train + FP_val + TP_val + TN_val)
+    final_acc_train = (TP_train + TN_train) / (FN_train + FP_train + TP_train + TN_train)
+    final_acc_val = (TP_val + TN_val) / (FN_val + FP_val + TP_val + TN_val)
+
 
 
 
     #####################################
-    ### Log to CSV
+    ### Logging
     #####################################
     print('')
     print('########### Generating Log')
+    json_log = {}
+    json_log['program_args'] = {}
 
     CSV_HEADER = [
         'mask_threshold', 
@@ -489,99 +518,61 @@ def main():
         'model_architecture',
         'queue_size',
         'l_rate',
-        'color_corm'
+        'color_corm',
+        'multi_process'
         ] 
 
-    csv_str = ''
-    #csv_str = 'PROGRAM ARGUMENTS:\n'
-    for item in CSV_HEADER:
-        csv_str += item + ','
+    second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION, USE_MULTI_PROCESS]
+    for i in range(len(second_line_tmp)):
+        json_log['program_args'][CSV_HEADER[i]] = second_line_tmp[i]
+        
+    #json_log['train_summary'] = hist.history
+    #json_log['train_summary']['train_get_batch_calls_start'] = str(training_get_batch_calls[0])
+    #json_log['train_summary']['train_get_batch_calls_end'] = str(training_get_batch_calls[1])
+    #json_log['train_summary']['val_get_batch_calls_start'] = str(validation_get_batch_calls[0])
+    #json_log['train_summary']['val_get_batch_calls_end'] = str(validation_get_batch_calls[1])
+    #json_log['train_summary']['epochs_durations'] = time_callback.times
+    #json_log['train_summary']['batch_read_durations'] = BATCH_READ_TIMES
 
-    csv_str += '\n' 
-    second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION]
-    for item in second_line_tmp:
-        csv_str += str(item) + ','
-        
-    print(csv_str)
-    f = open(LOG_ARGS, "w")
-    f.write(csv_str)
-    f.close()
-        
-    #csv_str += '\n\n\nTRAINING SUMMARY:'
-    csv_str = ''
-    csv_str += '\nacc_train_epoch,'
-    for item in hist.history['acc']:
-        csv_str += str(item) + ','
-        
-    csv_str += '\nval_train_epoch,'
-    for item in hist.history['val_acc']:
-        csv_str += str(item) + ','
-        
-    csv_str += '\nloss_train_epoch,'
-    for item in hist.history['loss']:
-        csv_str += str(item) + ','
-        
-    csv_str += '\nloss_val_epoch,'
-    for item in hist.history['val_loss']:
-        csv_str += str(item) + ','
-        
-    csv_str += '\nbatch_read_timings_seconds,'
-    for item in BATCH_READ_TIMES:
-        csv_str += str(float(str(item).replace(':',''))) + ','
-        
-    print(csv_str)
-    f = open(LOG_TRAIN, "w")
-    f.write(csv_str)
-    f.close()
-        
-    #csv_str += '\n\n\nFINAL MODEL EVALUATION:'
-    csv_str = ''
-    csv_str += '\ntp_train,' + str(TP_train)
-    csv_str += '\ntn_train,' + str(TN_train)
-    csv_str += '\nfp_train,' + str(FP_train)
-    csv_str += '\nfn_train,' + str(FN_train)
-    csv_str += '\ntp_val,' + str(TP_val)
-    csv_str += '\ntn_val,' + str(TN_val)
-    csv_str += '\nfp_val,' + str(FP_val)
-    csv_str += '\nfn_val,' + str(FN_val)
-    csv_str += '\nf1_train,' + str(f1_train)
-    csv_str += '\nf1_val,' + str(f1_val)
-    csv_str += '\nacc_train,' + str(final_acc_train)
-    csv_str += '\nacc_val,' + str(final_acc_val)
-    csv_str += '\nfpr_train,'
-    for item in fpr_train:
-        csv_str += str(item) + ','
-    csv_str += '\nfpr_val,'
-    for item in fpr_val:
-        csv_str += str(item) + ','
-    csv_str += '\ntpr_train,'
-    for item in tpr_train:
-        csv_str += str(item) + ','
-    csv_str += '\ntpr_val,'
-    for item in tpr_val:
-        csv_str += str(item) + ','
-    csv_str += '\nthreshold_train,'
-    for item in thresholds_trian:
-        csv_str += str(item) + ','
-    csv_str += '\nthreshold_val,'
-    for item in thresholds_val:
-        csv_str += str(item) + ','
-    csv_str += '\nauc_train,' + str(auc_train)
-    csv_str += '\nauc_val,' + str(auc_val)
-        
-    print(csv_str)
-    f = open(LOG_FINAL_MODEL, "w")
-    f.write(csv_str)
-    f.close()
+    json_log['final_model'] = {}
+    json_log['final_model']['tp_train'] = TP_train
+    json_log['final_model']['tn_train'] = TN_train
+    json_log['final_model']['fp_train'] = FP_train
+    json_log['final_model']['fn_train'] = FN_train
+    json_log['final_model']['tp_val'] = TP_val
+    json_log['final_model']['tn_val'] = TN_val
+    json_log['final_model']['fp_val'] = FP_val
+    json_log['final_model']['fn_val'] = FN_val
+    json_log['final_model']['f1_train'] = f1_train
+    json_log['final_model']['f1_val'] = f1_val
+    json_log['final_model']['acc_train'] = final_acc_train
+    json_log['final_model']['acc_val'] = final_acc_val
+    json_log['final_model']['fpr_train'] = fpr_train.tolist()
+    json_log['final_model']['fpr_val'] = fpr_val.tolist()
+    json_log['final_model']['tpr_train'] = tpr_train.tolist()
+    json_log['final_model']['tpr_val'] = tpr_val.tolist()
+    json_log['final_model']['threshold_train'] = thresholds_trian.tolist()
+    json_log['final_model']['threshold_val'] = thresholds_val.tolist()
+    json_log['final_model']['auc_train'] = auc_train
+    json_log['final_model']['auc_val'] = auc_val
 
+    def default(o):
+        if isinstance(o, np.int64): return int(o)  
+        raise TypeError
 
-
-
+    json_log = json.dumps(json_log, default=default)
+    with open(LOG, 'w') as fp:
+        json.dump(json_log, fp)
+        
+        
+        
+        
     #####################################
     ### Plots
     #####################################
     print('')
     print('########### Generating Plots')
+
 
     plt.ylabel('accuracy')
     plt.xlabel('epoch')
@@ -594,6 +585,7 @@ def main():
     plt.legend(loc=2)
     plt.savefig(GRAPH_ACC)
     plt.show()
+    plt.close()
 
 
     plt.ylabel('loss')
@@ -607,7 +599,7 @@ def main():
     plt.legend(loc=2)
     plt.savefig(GRAPH_LOSS)
     plt.show()
-
+    plt.close()
 
     plt.ylabel('tpr')
     plt.xlabel('fpr')
@@ -620,6 +612,9 @@ def main():
             fpr_val, 
             tpr_val, 
             label='valid')
+
+
     plt.legend(loc=2)
     plt.savefig(GRAPH_ROC)
     plt.show()
+    plt.close()
