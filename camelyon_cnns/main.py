@@ -383,12 +383,17 @@ def main():
     class TimeHistory(keras.callbacks.Callback):
         def on_train_begin(self, logs={}):
             self.times = []
+            self.starts = []
+            self.ends = []
 
         def on_epoch_begin(self, batch, logs={}):
             self.epoch_time_start = time()
 
         def on_epoch_end(self, batch, logs={}):
-            self.times.append(time() - self.epoch_time_start)
+            now = time()
+            self.times.append(now - self.epoch_time_start)
+            self.starts.append(self.epoch_time_start)
+            self.ends.append(now)
             
     time_callback = TimeHistory()
 
@@ -533,6 +538,8 @@ def main():
     json_log['train_summary']['val_get_batch_calls_end'] = str(validation_get_batch_calls[1])
     json_log['train_summary']['val_get_batch_calls_diff'] = str(validation_get_batch_calls[2])
     json_log['train_summary']['epochs_durations'] = time_callback.times
+    json_log['train_summary']['epochs_starts'] = time_callback.starts
+    json_log['train_summary']['epochs_ends'] = time_callback.ends
 
     json_log['final_model'] = {}
     json_log['final_model']['tp_train'] = TP_train
