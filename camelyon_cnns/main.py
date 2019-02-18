@@ -25,7 +25,7 @@ MODEL_FINAL = './model_final.hdf5'
 GRAPH_ACC = './acc.png'
 GRAPH_LOSS = './loss.png'
 GRAPH_ROC = './roc.png'
-LOG  = './log.json'
+LOG = './log.json'
 
 
 def main():
@@ -44,7 +44,7 @@ def main():
     L_RATE = 0.0001
     MASK_THRESHOLD = 0.1
     NORMALIZATION = 1
-    USE_MULTI_PROCESS = 0
+    WORKERS = None
 
 
 
@@ -104,8 +104,8 @@ def main():
         help='Colornormalization yes/no (1/0)'
     )
     parser.add_argument(
-        '--multi-process', action='store', type=str, metavar='MULTIPROCESS',
-        help='Parallel batch--generator yes/no (1/0).'
+        '--workers', action='store', type=str, metavar='MULTIPROCESS',
+        help='Number of parallel batch--generator workers. Setting this option enables multiprocessing.'
     )
 
     args = parser.parse_args()
@@ -124,7 +124,7 @@ def main():
     MASK_THRESHOLD = float(args.mask_threshold) if args.mask_threshold else MASK_THRESHOLD
     NORMALIZATION = float(args.color_norm) if args.color_norm else NORMALIZATION
     MODEL_USE = int(args.arch) if args.arch else MODEL_USE
-    USE_MULTI_PROCESS = int(args.multi_process) if args.arch else USE_MULTI_PROCESS
+    WORKERS = int(args.workers) if args.arch else WORKERS
     #'''
     
     print('--hdf5', HDF5_FILE)
@@ -138,8 +138,8 @@ def main():
     print('--queue-size', MAX_QUEUE_SIZE)
     print('--l-rate', L_RATE)
     print('--mask-threshold', MASK_THRESHOLD)
-    print('--l-color-norm', NORMALIZATION)
-    print('--l-multi-process', USE_MULTI_PROCESS)
+    print('--color-norm', NORMALIZATION)
+    print('--workers', WORKERS)
 
 
 
@@ -410,6 +410,10 @@ def main():
     train_data = TissueDataset(path=HDF5_FILE, validationset=False, verbose=False)
     val_data = TissueDataset(path=HDF5_FILE, validationset=True, verbose=False)
 
+    use_multiprocessing = None
+    if WORKERS is not None:
+        use_multiprocessing = True
+
     now1 = datetime.now()
     hist = model.fit_generator(
             generator=train_data.generator(BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION),
@@ -418,8 +422,8 @@ def main():
             validation_steps=BATCHES_PER_VAL_EPOCH,
             epochs=EPOCHS,
             callbacks=[time_callback, cp_callback], 
-            workers=6, 
-            use_multiprocessing=USE_MULTI_PROCESS, 
+            workers=WORKERS,
+            use_multiprocessing=use_multiprocessing,
             max_queue_size=MAX_QUEUE_SIZE)
     now2 = datetime.now()
 
@@ -523,10 +527,10 @@ def main():
         'queue_size',
         'l_rate',
         'color_corm',
-        'multi_process'
-        ] 
+        'workers'
+        ]
 
-    second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION, USE_MULTI_PROCESS]
+    second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION, WORKERS]
     for i in range(len(second_line_tmp)):
         json_log['program_args'][CSV_HEADER[i]] = second_line_tmp[i]
         
