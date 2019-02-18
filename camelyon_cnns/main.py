@@ -25,7 +25,7 @@ MODEL_FINAL = './model_final.hdf5'
 GRAPH_ACC = './acc.png'
 GRAPH_LOSS = './loss.png'
 GRAPH_ROC = './roc.png'
-LOG  = './log.txt'
+LOG  = './log.json'
 
 
 def main():
