@@ -411,7 +411,9 @@ def main():
     val_data = TissueDataset(path=HDF5_FILE, validationset=True, verbose=False)
 
     use_multiprocessing = None
+    workers = 1
     if WORKERS is not None:
+        workers = WORKERS
         use_multiprocessing = True
 
     now1 = datetime.now()
@@ -422,7 +424,7 @@ def main():
             validation_steps=BATCHES_PER_VAL_EPOCH,
             epochs=EPOCHS,
             callbacks=[time_callback, cp_callback], 
-            workers=WORKERS,
+            workers=workers,
             use_multiprocessing=use_multiprocessing,
             max_queue_size=MAX_QUEUE_SIZE)
     now2 = datetime.now()
