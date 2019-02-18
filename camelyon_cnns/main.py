@@ -124,7 +124,7 @@ def main():
     MASK_THRESHOLD = float(args.mask_threshold) if args.mask_threshold else MASK_THRESHOLD
     NORMALIZATION = float(args.color_norm) if args.color_norm else NORMALIZATION
     MODEL_USE = int(args.arch) if args.arch else MODEL_USE
-    WORKERS = int(args.workers) if args.arch else WORKERS
+    WORKERS = int(args.workers) if args.workers else WORKERS
     #'''
     
     print('--hdf5', HDF5_FILE)
