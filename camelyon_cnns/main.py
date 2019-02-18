@@ -146,8 +146,6 @@ def main():
     #####################################
     ### HDF5 - Loader and Batch Generator
     #####################################
-    BATCH_READ_TIMES = [] # For logging
-
     class TissueDataset():
         """Data set for preprocessed WSIs of the CAMELYON16 and CAMELYON17 data set."""
 
@@ -179,9 +177,10 @@ def main():
             if self.verbose: print(self.tumors)
             self.get_batch_call_start = []
             self.get_batch_call_end = []
+            self.get_batch_call_diff = []
             
         def get_batch_call_times(self):
-            return self.get_batch_call_start, self.get_batch_call_end
+            return self.get_batch_call_start, self.get_batch_call_end,  self.get_batch_call_diff
 
         def __get_tiles_from_path(self, dataset_names, max_wsis, number_tiles):
             tiles = np.ndarray((number_tiles, self.tilesize, self.tilesize, 3))
@@ -249,7 +248,7 @@ def main():
             p = np.random.permutation(len(y))
             now2 = time()
             self.get_batch_call_end.append(now2)
-            BATCH_READ_TIMES.append(now2-now1)
+            self.get_batch_call_diff.append(now2-now1)
             if self.verbose: print('batch_generator (start, end, diff): ',now1,now2,now2-now1)
             if self.verbose: print('batch: ', x.shape)
             return x[p], y[p]
@@ -526,13 +525,14 @@ def main():
     for i in range(len(second_line_tmp)):
         json_log['program_args'][CSV_HEADER[i]] = second_line_tmp[i]
         
-    #json_log['train_summary'] = hist.history
-    #json_log['train_summary']['train_get_batch_calls_start'] = str(training_get_batch_calls[0])
-    #json_log['train_summary']['train_get_batch_calls_end'] = str(training_get_batch_calls[1])
-    #json_log['train_summary']['val_get_batch_calls_start'] = str(validation_get_batch_calls[0])
-    #json_log['train_summary']['val_get_batch_calls_end'] = str(validation_get_batch_calls[1])
-    #json_log['train_summary']['epochs_durations'] = time_callback.times
-    #json_log['train_summary']['batch_read_durations'] = BATCH_READ_TIMES
+    json_log['train_summary'] = hist.history
+    json_log['train_summary']['train_get_batch_calls_start'] = str(training_get_batch_calls[0])
+    json_log['train_summary']['train_get_batch_calls_end'] = str(training_get_batch_calls[1])
+    json_log['train_summary']['train_get_batch_calls_diff'] = str(training_get_batch_calls[2])
+    json_log['train_summary']['val_get_batch_calls_start'] = str(validation_get_batch_calls[0])
+    json_log['train_summary']['val_get_batch_calls_end'] = str(validation_get_batch_calls[1])
+    json_log['train_summary']['val_get_batch_calls_diff'] = str(validation_get_batch_calls[2])
+    json_log['train_summary']['epochs_durations'] = time_callback.times
 
     json_log['final_model'] = {}
     json_log['final_model']['tp_train'] = TP_train
