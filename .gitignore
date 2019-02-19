@@ -1,3 +1,4 @@
 .idea
+dist
 camelyon_cnns.egg-info
 __pycache__
