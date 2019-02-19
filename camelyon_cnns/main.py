@@ -573,9 +573,8 @@ def main():
         if isinstance(o, np.int64): return int(o)  
         raise TypeError
 
-    json_log = json.dumps(json_log, default=default)
     with open(LOG, 'w') as fp:
-        json.dump(json_log, fp)
+        json.dump(json_log, fp, default=default)
         
         
         
