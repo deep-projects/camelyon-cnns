@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import random
 import h5py
 import json
+from uuid import uuid4
 
 import os
 
@@ -46,9 +47,6 @@ def main():
     NORMALIZATION = 1
     WORKERS = None
 
-
-
-    #'''
     #####################################
     ### Arg Parser
     #####################################
@@ -125,7 +123,6 @@ def main():
     NORMALIZATION = float(args.color_norm) if args.color_norm else NORMALIZATION
     MODEL_USE = int(args.arch) if args.arch else MODEL_USE
     WORKERS = int(args.workers) if args.workers else WORKERS
-    #'''
     
     print('--hdf5', HDF5_FILE)
     print('--arch', MODEL_USE)
@@ -175,13 +172,8 @@ def main():
             self.n_normals = len(self.normals)
             if self.verbose: print(self.normals)
             if self.verbose: print(self.tumors)
-            self.get_batch_call_start = []
-            self.get_batch_call_end = []
-            self.get_batch_call_diff = []
+            self.batch_times = {}
             
-        def get_batch_call_times(self):
-            return self.get_batch_call_start, self.get_batch_call_end,  self.get_batch_call_diff
-
         def __get_tiles_from_path(self, dataset_names, max_wsis, number_tiles):
             tiles = np.ndarray((number_tiles, self.tilesize, self.tilesize, 3))
             for i in range(number_tiles):
@@ -224,13 +216,16 @@ def main():
             return self.__get_tiles_from_path(self.normals, self.n_normals, number_tiles), np.zeros((number_tiles))
 
         def generator(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
+            gen_id = str(uuid4())
+            self.batch_times[gen_id] = []
             while True:
+                start_time = time()
                 x, y = self.get_batch(num_neg, num_pos, data_augm, normalize)
+                end_time = time()
+                self.batch_times[gen_id].append((start_time, end_time))
                 yield x, y
 
         def get_batch(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
-            now1 = time()
-            self.get_batch_call_start.append(now1)
             x_p, y_p = self.__get_random_positive_tiles(num_pos)
             x_n, y_n = self.__get_random_negative_tiles(num_neg)
             x = np.concatenate((x_p, x_n), axis=0)
@@ -246,11 +241,6 @@ def main():
                 x[:,:,:,2] = (x[:,:,:,2] - np.mean(x[:,:,:,2])) / np.std(x[:,:,:,2])
 
             p = np.random.permutation(len(y))
-            now2 = time()
-            self.get_batch_call_end.append(now2)
-            self.get_batch_call_diff.append(now2-now1)
-            if self.verbose: print('batch_generator (start, end, diff): ',now1,now2,now2-now1)
-            if self.verbose: print('batch: ', x.shape)
             return x[p], y[p]
 
 
@@ -416,7 +406,6 @@ def main():
         workers = WORKERS
         use_multiprocessing = True
 
-    now1 = datetime.now()
     hist = model.fit_generator(
             generator=train_data.generator(BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION),
             steps_per_epoch=BATCHES_PER_TRAIN_EPOCH, 
@@ -427,15 +416,6 @@ def main():
             workers=workers,
             use_multiprocessing=use_multiprocessing,
             max_queue_size=MAX_QUEUE_SIZE)
-    now2 = datetime.now()
-
-
-    total_training_time = now2-now1
-    training_get_batch_calls = train_data.get_batch_call_times()
-    validation_get_batch_calls = val_data.get_batch_call_times()
-
-
-
 
     #####################################
     ### Print Summary
@@ -457,8 +437,6 @@ def main():
 
 
 
-
-
     #####################################
     ### FINAL VALIDATION
     #####################################
@@ -469,12 +447,16 @@ def main():
     preds_train = []
     y_val = []
     preds_val = []
+
+    train_data_final_val = TissueDataset(path=HDF5_FILE, validationset=False, verbose=False)
+    val_data_final_val = TissueDataset(path=HDF5_FILE, validationset=True, verbose=False)
+
     for i in range(BATCHES_PER_TRAIN_EPOCH + BATCHES_PER_VAL_EPOCH):
-        x_train, y_train_tmp = train_data.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION)
+        x_train, y_train_tmp = train_data_final_val.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION)
         preds_train += (model.predict(x_train, batch_size=(BATCH_SIZE_NEG + BATCH_SIZE_POS), verbose=1).tolist())
         y_train += (y_train_tmp.tolist())
 
-        x_val, y_val_tmp = val_data.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, False, NORMALIZATION)
+        x_val, y_val_tmp = val_data_final_val.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, False, NORMALIZATION)
         preds_val += (model.predict(x_val, batch_size=(BATCH_SIZE_NEG + BATCH_SIZE_POS), verbose=1).tolist())
         y_val += (y_val_tmp.tolist())
 
@@ -507,16 +489,11 @@ def main():
     final_acc_train = (TP_train + TN_train) / (FN_train + FP_train + TP_train + TN_train)
     final_acc_val = (TP_val + TN_val) / (FN_val + FP_val + TP_val + TN_val)
 
-
-
-
     #####################################
     ### Logging
     #####################################
     print('')
     print('########### Generating Log')
-    json_log = {}
-    json_log['program_args'] = {}
 
     CSV_HEADER = [
         'mask_threshold', 
@@ -532,17 +509,17 @@ def main():
         'workers'
         ]
 
+    json_log = {
+        'program_args': {}
+    }
+
     second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION, WORKERS]
     for i in range(len(second_line_tmp)):
         json_log['program_args'][CSV_HEADER[i]] = second_line_tmp[i]
         
     json_log['train_summary'] = hist.history
-    json_log['train_summary']['train_get_batch_calls_start'] = str(training_get_batch_calls[0])
-    json_log['train_summary']['train_get_batch_calls_end'] = str(training_get_batch_calls[1])
-    json_log['train_summary']['train_get_batch_calls_diff'] = str(training_get_batch_calls[2])
-    json_log['train_summary']['val_get_batch_calls_start'] = str(validation_get_batch_calls[0])
-    json_log['train_summary']['val_get_batch_calls_end'] = str(validation_get_batch_calls[1])
-    json_log['train_summary']['val_get_batch_calls_diff'] = str(validation_get_batch_calls[2])
+    json_log['train_summary']['train_batch_times'] = train_data.batch_times
+    json_log['train_summary']['val_batch_times'] = val_data.batch_times
     json_log['train_summary']['epochs_durations'] = time_callback.times
     json_log['train_summary']['epochs_starts'] = time_callback.starts
     json_log['train_summary']['epochs_ends'] = time_callback.ends
