@@ -14,7 +14,7 @@ from time import time
 from argparse import ArgumentParser
 from tensorflow import keras
 from sklearn import metrics as metrics
-from .datasets import TissueDataset, TissueDatasetFast
+from .datasets import TissueDataset, TissueDatasetFast, TissueDatasetFastWithValidation
 
 
 #####################################
@@ -151,7 +151,7 @@ def main():
     #####################################
 
     if FAST_HDF5:
-        tsDsetToUse = TissueDatasetFast
+        tsDsetToUse = TissueDatasetFastWithValidation
     else:
         tsDsetToUse = TissueDataset
 

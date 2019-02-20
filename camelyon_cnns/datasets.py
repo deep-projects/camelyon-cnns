@@ -167,3 +167,79 @@ class TissueDatasetFast():
 
         p = np.random.permutation(len(y))
         return x[p], y[p]
+
+
+class TissueDatasetFastWithValidation():
+    """Data set for preprocessed WSIs of the CAMELYON16 and CAMELYON17 data set."""
+
+    def __init__(self, path, validationset=False, verbose=False, threshold=0.1):      
+        self.h5 = h5py.File(path, 'r', libver='latest', swmr=True)
+        self.tilesize = 224
+        self.verbose = verbose
+        self.threshold = threshold
+        if validationset:
+            if verbose: print('validation set:')
+            self.tumors = self.h5['tumor_train']
+            self.normals = self.h5['normal_train']
+        else:
+            if verbose: print('training set:')
+            self.tumors = self.h5['tumor_valid']
+            self.normals = self.h5['normal_valid']
+        self.n_tumors = self.tumors.shape[0]
+        self.n_normals = self.normals.shape[0]
+        self.batch_times = {}
+        
+    def __get_tiles_from_path(self, dataset, max_wsis, number_tiles):
+        number_tiles = number_tiles * 2
+        hdf5_tilesize = dataset.shape[1]
+        wsi_idx = np.random.randint(0, max_wsis-number_tiles)
+        rand_height = np.random.randint(0, hdf5_tilesize-self.tilesize)
+        rand_width = np.random.randint(0, hdf5_tilesize-self.tilesize)
+
+        masks = dataset[wsi_idx:wsi_idx+number_tiles, rand_height:rand_height+self.tilesize, rand_width:rand_width+self.tilesize,-1]
+        tiles = dataset[wsi_idx:wsi_idx+number_tiles, rand_height:rand_height+self.tilesize, rand_width:rand_width+self.tilesize,0:-1]
+        valid_idxs = []
+        for i in range(masks.shape[0]):
+            if masks[i].sum() > self.threshold * (self.tilesize**2):
+                valid_idxs.append(i)
+        tiles = tiles[valid_idxs]
+        number_tiles = number_tiles // 2
+        tiles = tiles[0:number_tiles]
+        tiles = tiles / 255.
+        return tiles
+
+    def __get_random_positive_tiles(self, number_tiles):
+        if self.verbose: print('getting_tumor_tile')
+        return self.__get_tiles_from_path(self.tumors, self.n_tumors, number_tiles), np.ones((number_tiles))
+
+    def __get_random_negative_tiles(self, number_tiles):
+        if self.verbose: print('getting_normal_tile')
+        return self.__get_tiles_from_path(self.normals, self.n_normals, number_tiles), np.zeros((number_tiles))
+
+    def generator(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
+        gen_id = str(uuid4())
+        self.batch_times[gen_id] = []
+        while True:
+            start_time = time()
+            x, y = self.get_batch(num_neg, num_pos, data_augm, normalize)
+            end_time = time()
+            self.batch_times[gen_id].append((start_time, end_time))
+            yield x, y
+
+    def get_batch(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
+        x_p, y_p = self.__get_random_positive_tiles(num_pos)
+        x_n, y_n = self.__get_random_negative_tiles(num_neg)
+        x = np.concatenate((x_p, x_n), axis=0)
+        y = np.concatenate((y_p, y_n), axis=0)
+
+        if data_augm:
+            if np.random.randint(0,2): x = np.flip(x, axis=1)
+            if np.random.randint(0,2): x = np.flip(x, axis=2)
+            x = np.rot90(m=x, k=np.random.randint(0,4), axes=(1,2))
+        if normalize:
+            x[:,:,:,0] = (x[:,:,:,0] - np.mean(x[:,:,:,0])) / np.std(x[:,:,:,0])
+            x[:,:,:,1] = (x[:,:,:,1] - np.mean(x[:,:,:,1])) / np.std(x[:,:,:,1])
+            x[:,:,:,2] = (x[:,:,:,2] - np.mean(x[:,:,:,2])) / np.std(x[:,:,:,2])
+
+        p = np.random.permutation(len(y))
+        return x[p], y[p]
