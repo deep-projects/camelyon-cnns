@@ -182,6 +182,7 @@ def main():
             ax.imshow(x[i])
             ax.axis('off') 
         break # generate yields infinite random samples, so we stop after first
+    plt.close()
 
 
 
