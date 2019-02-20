@@ -371,12 +371,16 @@ def main():
     train_data_final_val = tsDsetToUse(path=HDF5_FILE, validationset=False, verbose=False, threshold=MASK_THRESHOLD)
     val_data_final_val = tsDsetToUse(path=HDF5_FILE, validationset=True, verbose=False, threshold=MASK_THRESHOLD)
 
+    caches = {
+        'pos_cache': None,
+        'neg_cache': None
+    }
     for i in range(BATCHES_PER_TRAIN_EPOCH + BATCHES_PER_VAL_EPOCH):
-        x_train, y_train_tmp = train_data_final_val.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION)
+        x_train, y_train_tmp = train_data_final_val.get_batch(caches, BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION)
         preds_train += (model.predict(x_train, batch_size=(BATCH_SIZE_NEG + BATCH_SIZE_POS), verbose=1).tolist())
         y_train += (y_train_tmp.tolist())
 
-        x_val, y_val_tmp = val_data_final_val.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, False, NORMALIZATION)
+        x_val, y_val_tmp = val_data_final_val.get_batch(caches, BATCH_SIZE_NEG, BATCH_SIZE_POS, False, NORMALIZATION)
         preds_val += (model.predict(x_val, batch_size=(BATCH_SIZE_NEG + BATCH_SIZE_POS), verbose=1).tolist())
         y_val += (y_val_tmp.tolist())
 
