@@ -168,10 +168,14 @@ def main():
     print('########### Getting one sample batch -verbose')
 
     train_data_tmp = tsDsetToUse(path=HDF5_FILE, validationset=False, verbose=True, threshold=MASK_THRESHOLD)
-    val_data_tmp = tsDsetToUse(path=HDF5_FILE, validationset=True, verbose=True, threshold=MASK_THRESHOLD)
+    # val_data_tmp = tsDsetToUse(path=HDF5_FILE, validationset=True, verbose=True, threshold=MASK_THRESHOLD)
 
-
-    itera = train_data_tmp.generator(num_neg=BATCH_SIZE_NEG, num_pos=BATCH_SIZE_POS, data_augm=True, normalize=NORMALIZATION)
+    itera = train_data_tmp.generator(
+        num_neg=BATCH_SIZE_NEG,
+        num_pos=BATCH_SIZE_POS,
+        data_augm=True,
+        normalize=NORMALIZATION
+    )
     plt.figure(figsize=(12,4))
     for x, y in itera:
         print(x.shape)
@@ -330,7 +334,8 @@ def main():
             callbacks=[time_callback, cp_callback], 
             workers=workers,
             use_multiprocessing=use_multiprocessing,
-            max_queue_size=MAX_QUEUE_SIZE)
+            max_queue_size=MAX_QUEUE_SIZE
+    )
 
     #####################################
     ### Print Summary
@@ -468,9 +473,9 @@ def main():
 
     with open(LOG, 'w') as fp:
         json.dump(json_log, fp, default=default)
-        
-        
-        
+
+
+
         
     #####################################
     ### Plots

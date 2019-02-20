@@ -245,20 +245,26 @@ class TissueDatasetFastWithValidation():
             if caches['pos_cache'] is None:
                 caches['pos_cache'] = self.__get_random_positive_tiles(data_slice_size)
 
+            if self.verbose:
+                print('pos_cache.shape:', caches['pos_cache'].shape)
+
             if caches['pos_cache'].shape[0] >= num_pos:
                 break
 
-            np.concatenate((caches['pos_cache'], self.__get_random_positive_tiles(data_slice_size)), axis=0)
+            caches['pos_cache'] = np.concatenate((caches['pos_cache'], self.__get_random_positive_tiles(data_slice_size)), axis=0)
 
         # fill negative tiles cache
         while True:
             if caches['neg_cache'] is None:
                 caches['neg_cache'] = self.__get_random_negative_tiles(data_slice_size)
 
+            if self.verbose:
+                print('neg_cache.shape:', caches['neg_cache'].shape)
+
             if caches['neg_cache'].shape[0] >= num_neg:
                 break
 
-            np.concatenate((caches['neg_cache'], self.__get_random_negative_tiles(data_slice_size)), axis=0)
+            caches['neg_cache'] = np.concatenate((caches['neg_cache'], self.__get_random_negative_tiles(data_slice_size)), axis=0)
 
         # take tiles from cache
         x_p = caches['pos_cache'][:num_pos]
@@ -266,9 +272,6 @@ class TissueDatasetFastWithValidation():
 
         caches['pos_cache'] = caches['pos_cache'][num_pos:]
         caches['neg_cache'] = caches['neg_cache'][num_pos:]
-
-        #x_p = self.__get_random_positive_tiles(num_pos)
-        #x_n = self.__get_random_negative_tiles(num_neg)
 
         y_p = np.ones((num_pos))
         y_n = np.zeros((num_neg))
