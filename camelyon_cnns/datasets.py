@@ -188,8 +188,6 @@ class TissueDatasetFastWithValidation():
         self.n_tumors = self.tumors.shape[0]
         self.n_normals = self.normals.shape[0]
         self.batch_times = {}
-        self.pos_tiles_cache = None
-        self.neg_tiles_cache = None
         
     def __get_tiles_from_path(self, dataset, max_wsis, number_tiles):
         hdf5_tilesize = dataset.shape[1]
@@ -201,14 +199,14 @@ class TissueDatasetFastWithValidation():
         #tiles = dataset[wsi_idx:wsi_idx+number_tiles, rand_height:rand_height+self.tilesize, rand_width:rand_width+self.tilesize,0:-1]
 
         loaded = dataset[wsi_idx:wsi_idx+number_tiles, rand_height:rand_height+self.tilesize, rand_width:rand_width+self.tilesize,:]
-        masks = loaded[wsi_idx:wsi_idx+number_tiles, rand_height:rand_height+self.tilesize, rand_width:rand_width+self.tilesize,-1]
-        tiles = loaded[wsi_idx:wsi_idx + number_tiles, rand_height:rand_height + self.tilesize, rand_width:rand_width + self.tilesize,0:-1]
+        masks = loaded[:, :, :, -1]
+        tiles = loaded[:, :, :, :-1]
 
         valid_idxs = []
         for i in range(masks.shape[0]):
             if masks[i].sum() > self.threshold * (self.tilesize**2):
                 valid_idxs.append(i)
-        tiles = tiles[valid_idxs, :, :, :]
+        tiles = tiles[valid_idxs]
         tiles = tiles / 255.
         return tiles
 
@@ -220,43 +218,54 @@ class TissueDatasetFastWithValidation():
         if self.verbose: print('getting_normal_tile')
         return self.__get_tiles_from_path(self.normals, self.n_normals, number_tiles)
 
-    def generator(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
+    def generator(self, num_neg=10, num_pos=10, data_augm=False, normalize=False, data_slice_size=100):
         gen_id = str(uuid4())
         self.batch_times[gen_id] = []
+        caches = {
+            'pos_cache': None,
+            'neg_cache': None
+        }
         while True:
             start_time = time()
-            x, y = self.get_batch(num_neg, num_pos, data_augm, normalize)
+            x, y = self.get_batch(
+                caches,
+                num_pos=num_pos,
+                num_neg=num_neg,
+                data_augm=data_augm,
+                normalize=normalize,
+                data_slice_size=data_slice_size
+            )
             end_time = time()
             self.batch_times[gen_id].append((start_time, end_time))
             yield x, y
 
-    def get_batch(self, num_neg=10, num_pos=10, data_augm=False, normalize=False, data_slice_size=100):
+    def get_batch(self, caches, num_neg=10, num_pos=10, data_augm=False, normalize=False, data_slice_size=100):
         # fill positive tiles cache
         while True:
-            if self.pos_tiles_cache is None:
-                self.pos_tiles_cache = self.__get_random_positive_tiles(data_slice_size)
+            if caches['pos_cache'] is None:
+                caches['pos_cache'] = self.__get_random_positive_tiles(data_slice_size)
 
-            if self.pos_tiles_cache.shape[0] >= num_pos:
+            if caches['pos_cache'].shape[0] >= num_pos:
                 break
 
-            np.concatenate((self.pos_tiles_cache, self.__get_random_positive_tiles(data_slice_size)), axis=0)
+            np.concatenate((caches['pos_cache'], self.__get_random_positive_tiles(data_slice_size)), axis=0)
 
         # fill negative tiles cache
         while True:
-            if self.neg_tiles_cache is None:
-                self.neg_tiles_cache = self.__get_random_negative_tiles(data_slice_size)
+            if caches['neg_cache'] is None:
+                caches['neg_cache'] = self.__get_random_negative_tiles(data_slice_size)
 
-            if self.neg_tiles_cache.shape[0] >= num_neg:
+            if caches['neg_cache'].shape[0] >= num_neg:
                 break
 
-            np.concatenate((self.neg_tiles_cache, self.__get_random_negative_tiles(data_slice_size)), axis=0)
+            np.concatenate((caches['neg_cache'], self.__get_random_negative_tiles(data_slice_size)), axis=0)
 
         # take tiles from cache
-        x_p = self.pos_tiles_cache[:num_pos, :, :, :]
-        x_n = self.neg_tiles_cache[:num_neg, :, :, :]
+        x_p = caches['pos_cache'][:num_pos]
+        x_n = caches['neg_cache'][:num_neg]
 
-        self.pos_tiles_cache = self.pos_tiles_cache[num_pos:, :, :, :]
-        self.neg_tiles_cache = self.neg_tiles_cache[num_pos:, :, :, :]
+        caches['pos_cache'] = caches['pos_cache'][num_pos:]
+        caches['neg_cache'] = caches['neg_cache'][num_pos:]
 
         #x_p = self.__get_random_positive_tiles(num_pos)
         #x_n = self.__get_random_negative_tiles(num_neg)
