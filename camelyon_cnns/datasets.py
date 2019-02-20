@@ -208,7 +208,7 @@ class TissueDatasetFastWithValidation():
         for i in range(masks.shape[0]):
             if masks[i].sum() > self.threshold * (self.tilesize**2):
                 valid_idxs.append(i)
-        tiles = tiles[valid_idxs]
+        tiles = tiles[valid_idxs, :, :, :]
         tiles = tiles / 255.
         return tiles
 
