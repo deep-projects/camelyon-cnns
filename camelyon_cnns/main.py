@@ -5,9 +5,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import random
-import h5py
 import json
-from uuid import uuid4
 
 import os
 
@@ -16,6 +14,7 @@ from time import time
 from argparse import ArgumentParser
 from tensorflow import keras
 from sklearn import metrics as metrics
+from .datasets import TissueDataset, TissueDatasetFast
 
 
 #####################################
@@ -46,6 +45,7 @@ def main():
     MASK_THRESHOLD = 0.1
     NORMALIZATION = 1
     WORKERS = None
+    FAST_HDF5 = 0
 
     #####################################
     ### Arg Parser
@@ -105,6 +105,10 @@ def main():
         '--workers', action='store', type=str, metavar='MULTIPROCESS',
         help='Number of parallel batch--generator workers. Setting this option enables multiprocessing.'
     )
+    parser.add_argument(
+        '--fast-hdf5', action='store', type=str, metavar='FASTHDF5',
+        help='Which kind of HDF5 Format to you yes/no (1/0).'
+    )
 
     args = parser.parse_args()
 
@@ -123,6 +127,7 @@ def main():
     NORMALIZATION = float(args.color_norm) if args.color_norm else NORMALIZATION
     MODEL_USE = int(args.arch) if args.arch else MODEL_USE
     WORKERS = int(args.workers) if args.workers else WORKERS
+    FAST_HDF5 = int(args.fast_hdf5) if args.fast_hdf5 else FAST_HDF5
     
     print('--hdf5', HDF5_FILE)
     print('--arch', MODEL_USE)
@@ -137,111 +142,20 @@ def main():
     print('--mask-threshold', MASK_THRESHOLD)
     print('--color-norm', NORMALIZATION)
     print('--workers', WORKERS)
+    print('--fast-hdf5', FAST_HDF5)
 
 
 
     #####################################
     ### HDF5 - Loader and Batch Generator
     #####################################
-    class TissueDataset():
-        """Data set for preprocessed WSIs of the CAMELYON16 and CAMELYON17 data set."""
 
-        def __init__(self, path, validationset=False, verbose=False):      
-            self.h5 = h5py.File(path, 'r', libver='latest', swmr=True)
-            self.tilesize = 224
-            self.verbose = verbose
-            self.normals = []
-            self.tumors = []
-            for group in self.h5:
-                for sub in self.h5[group]:
-                    if 'umor' in sub:
-                        self.tumors.append('tumor/' + sub)
-                    elif 'ormal' in sub:
-                        self.normals.append('normal/' + sub)
-                    for subsub in self.h5[group][sub]:
-                        dset = self.h5[group][sub][subsub]
-            if validationset:
-                if verbose: print('validation set:')
-                self.normals = self.normals[1::2]
-                self.tumors = self.tumors[1::2]
-            else:
-                if verbose: print('training set:')
-                self.normals = self.normals[::2]
-                self.tumors = self.tumors[::2]
-            self.n_tumors = len(self.tumors)
-            self.n_normals = len(self.normals)
-            if self.verbose: print(self.normals)
-            if self.verbose: print(self.tumors)
-            self.batch_times = {}
-            
-        def __get_tiles_from_path(self, dataset_names, max_wsis, number_tiles):
-            tiles = np.ndarray((number_tiles, self.tilesize, self.tilesize, 3))
-            for i in range(number_tiles):
-                if self.verbose: print('gettin_tile_nr ', i)
-                valid_tile = False
-                while valid_tile == False:            
-                    wsi_idx = np.random.randint(0, max_wsis)
-                    wsi = self.h5[dataset_names[wsi_idx]]
-                    zoom_lvl = 0
-                    n_tiles = len(wsi['img'][zoom_lvl, :, 0, 0])
-                    if n_tiles >= 1:
-                        #n_tiles = len(wsi['img'][zoom_lvl]) ##### SUPERSLOW
-                        tile_idx = np.random.randint(0, n_tiles)
-                        mask = wsi['mask'][zoom_lvl, tile_idx]
-                        #mask = wsi['mask'][zoom_lvl][tile_idx] ##### SPERSLOW
-                        ### crop random 256x256
-                        hdf5_tilesize = mask.shape[0]
-                        trys_to_get_valid_tile = 0
-                        while trys_to_get_valid_tile < 10:
-                            if self.verbose: print('trys_to_get_valid_tile ', trys_to_get_valid_tile)
-                            rand_height = np.random.randint(0, hdf5_tilesize-self.tilesize)
-                            rand_width = np.random.randint(0, hdf5_tilesize-self.tilesize)
-                            mask_cropped = mask[rand_height:rand_height+self.tilesize, rand_width:rand_width+self.tilesize]
-                            if mask_cropped.sum() > (self.tilesize*self.tilesize * MASK_THRESHOLD):
-                                tile_cropped = wsi['img'][zoom_lvl, tile_idx, rand_height:rand_height+self.tilesize,rand_width:rand_width+self.tilesize]
-                                tiles[i] = tile_cropped
-                                trys_to_get_valid_tile = 1337
-                                valid_tile = True
-                            trys_to_get_valid_tile += 1
+    if FAST_HDF5:
+        tsDsetToUse = TissueDatasetFast
+    else:
+        tsDsetToUse = TissueDataset
 
-            tiles = tiles / 255.
-            return tiles
-
-        def __get_random_positive_tiles(self, number_tiles):
-            if self.verbose: print('getting_tumor_tile')
-            return self.__get_tiles_from_path(self.tumors, self.n_tumors, number_tiles), np.ones((number_tiles))
-
-        def __get_random_negative_tiles(self, number_tiles):
-            if self.verbose: print('getting_normal_tile')
-            return self.__get_tiles_from_path(self.normals, self.n_normals, number_tiles), np.zeros((number_tiles))
-
-        def generator(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
-            gen_id = str(uuid4())
-            self.batch_times[gen_id] = []
-            while True:
-                start_time = time()
-                x, y = self.get_batch(num_neg, num_pos, data_augm, normalize)
-                end_time = time()
-                self.batch_times[gen_id].append((start_time, end_time))
-                yield x, y
-
-        def get_batch(self, num_neg=10, num_pos=10, data_augm=False, normalize=False):
-            x_p, y_p = self.__get_random_positive_tiles(num_pos)
-            x_n, y_n = self.__get_random_negative_tiles(num_neg)
-            x = np.concatenate((x_p, x_n), axis=0)
-            y = np.concatenate((y_p, y_n), axis=0)
-
-            if data_augm:
-                if np.random.randint(0,2): x = np.flip(x, axis=1)
-                if np.random.randint(0,2): x = np.flip(x, axis=2)
-                x = np.rot90(m=x, k=np.random.randint(0,4), axes=(1,2))
-            if normalize:
-                x[:,:,:,0] = (x[:,:,:,0] - np.mean(x[:,:,:,0])) / np.std(x[:,:,:,0])
-                x[:,:,:,1] = (x[:,:,:,1] - np.mean(x[:,:,:,1])) / np.std(x[:,:,:,1])
-                x[:,:,:,2] = (x[:,:,:,2] - np.mean(x[:,:,:,2])) / np.std(x[:,:,:,2])
-
-            p = np.random.permutation(len(y))
-            return x[p], y[p]
+ 
 
 
 
@@ -253,21 +167,21 @@ def main():
     print('')
     print('########### Getting one sample batch -verbose')
 
-    train_data_tmp = TissueDataset(path=HDF5_FILE, validationset=False, verbose=True)
-    val_data_tmp = TissueDataset(path=HDF5_FILE, validationset=True, verbose=True)
+    train_data_tmp = tsDsetToUse(path=HDF5_FILE, validationset=False, verbose=True, threshold=MASK_THRESHOLD)
+    val_data_tmp = tsDsetToUse(path=HDF5_FILE, validationset=True, verbose=True, threshold=MASK_THRESHOLD)
 
 
     itera = train_data_tmp.generator(num_neg=BATCH_SIZE_NEG, num_pos=BATCH_SIZE_POS, data_augm=True, normalize=NORMALIZATION)
-    #plt.figure(figsize=(12,4))
-    #for x, y in itera:
-    #    print(x.shape)
-    #    for i in range(2):
-    #        ax = plt.subplot(1, 2, i + 1)
-    #        plt.tight_layout()
-    #        ax.set_title('Sample #{} - class {}'.format(i, y[i]))
-    #        ax.imshow(x[i])
-    #        ax.axis('off') 
-    #    break # generate yields infinite random samples, so we stop after first
+    plt.figure(figsize=(12,4))
+    for x, y in itera:
+        print(x.shape)
+        for i in range(2):
+            ax = plt.subplot(1, 2, i + 1)
+            plt.tight_layout()
+            ax.set_title('Sample #{} - class {}'.format(i, y[i]))
+            ax.imshow(x[i])
+            ax.axis('off') 
+        break # generate yields infinite random samples, so we stop after first
 
 
 
@@ -397,8 +311,8 @@ def main():
 
 
 
-    train_data = TissueDataset(path=HDF5_FILE, validationset=False, verbose=False)
-    val_data = TissueDataset(path=HDF5_FILE, validationset=True, verbose=False)
+    train_data = tsDsetToUse(path=HDF5_FILE, validationset=False, verbose=False, threshold=MASK_THRESHOLD)
+    val_data = tsDsetToUse(path=HDF5_FILE, validationset=True, verbose=False, threshold=MASK_THRESHOLD)
 
     use_multiprocessing = None
     workers = 1
@@ -448,8 +362,8 @@ def main():
     y_val = []
     preds_val = []
 
-    train_data_final_val = TissueDataset(path=HDF5_FILE, validationset=False, verbose=False)
-    val_data_final_val = TissueDataset(path=HDF5_FILE, validationset=True, verbose=False)
+    train_data_final_val = tsDsetToUse(path=HDF5_FILE, validationset=False, verbose=False, threshold=MASK_THRESHOLD)
+    val_data_final_val = tsDsetToUse(path=HDF5_FILE, validationset=True, verbose=False, threshold=MASK_THRESHOLD)
 
     for i in range(BATCHES_PER_TRAIN_EPOCH + BATCHES_PER_VAL_EPOCH):
         x_train, y_train_tmp = train_data_final_val.get_batch(BATCH_SIZE_NEG, BATCH_SIZE_POS, True, NORMALIZATION)
@@ -506,14 +420,15 @@ def main():
         'queue_size',
         'l_rate',
         'color_corm',
-        'workers'
+        'workers',
+        'fast_hdf5'
         ]
 
     json_log = {
         'program_args': {}
     }
 
-    second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION, WORKERS]
+    second_line_tmp = [MASK_THRESHOLD, BATCH_SIZE_POS, BATCH_SIZE_NEG, BATCHES_PER_TRAIN_EPOCH, BATCHES_PER_VAL_EPOCH, EPOCHS, MODEL_USE, MAX_QUEUE_SIZE, L_RATE, NORMALIZATION, WORKERS, FAST_HDF5]
     for i in range(len(second_line_tmp)):
         json_log['program_args'][CSV_HEADER[i]] = second_line_tmp[i]
         
