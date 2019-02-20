@@ -246,17 +246,17 @@ class TissueDatasetFastWithValidation():
             if self.neg_tiles_cache is None:
                 self.neg_tiles_cache = self.__get_random_negative_tiles(data_slice_size)
 
-            if self.neg_tiles_cache.shape[0] >= num_pos:
+            if self.neg_tiles_cache.shape[0] >= num_neg:
                 break
 
             np.concatenate((self.neg_tiles_cache, self.__get_random_negative_tiles(data_slice_size)), axis=0)
 
         # take tiles from cache
-        x_p = self.pos_tiles_cache[:num_pos]
-        x_n = self.neg_tiles_cache[:num_neg]
+        x_p = self.pos_tiles_cache[:num_pos, :, :, :]
+        x_n = self.neg_tiles_cache[:num_neg, :, :, :]
 
-        self.pos_tiles_cache = self.pos_tiles_cache[num_pos:]
-        self.neg_tiles_cache = self.neg_tiles_cache[num_pos:]
+        self.pos_tiles_cache = self.pos_tiles_cache[num_pos:, :, :, :]
+        self.neg_tiles_cache = self.neg_tiles_cache[num_pos:, :, :, :]
 
         #x_p = self.__get_random_positive_tiles(num_pos)
         #x_n = self.__get_random_negative_tiles(num_neg)
