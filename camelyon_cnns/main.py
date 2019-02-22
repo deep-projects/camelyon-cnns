@@ -53,12 +53,12 @@ def main():
     print('')
     print('########### Program Args')
 
-    DESCRIPTION = 'Train CNN on merged HDF5'
+    DESCRIPTION = 'CAMELYON CNNs trains Convolutional Neural Networks on the CAMELYON image database.'
 
     parser = ArgumentParser(description=DESCRIPTION)
     parser.add_argument(
         'hdf5', action='store', type=str, metavar='HDF5FILE',
-        help='File path to hdf5 file'
+        help='File path to hdf5 file. Can also be a directory path, if the directory contains a file called merged.hdf5.'
     )
 
     parser.add_argument(
@@ -71,7 +71,7 @@ def main():
     )
     parser.add_argument(
         '--batch-size-pos', action='store', type=str, metavar='BATCHSIZEPOS',
-        help='Batch size for negative examples.'
+        help='Batch size for positive examples.'
     )
     parser.add_argument(
         '--batches-train', action='store', type=str, metavar='BATCHESTRAIN',
@@ -99,7 +99,7 @@ def main():
     )
     parser.add_argument(
         '--color-norm', action='store', type=str, metavar='COLORNORM',
-        help='Colornormalization yes/no (1/0)'
+        help='Colornormalization yes/no (1/0).'
     )
     parser.add_argument(
         '--workers', action='store', type=str, metavar='MULTIPROCESS',
@@ -107,7 +107,7 @@ def main():
     )
     parser.add_argument(
         '--fast-hdf5', action='store', type=str, metavar='FASTHDF5',
-        help='Which kind of HDF5 Format to you yes/no (1/0).'
+        help='Switch HDF5 Format to IO optimized version yes/no (1/0).'
     )
 
     args = parser.parse_args()
