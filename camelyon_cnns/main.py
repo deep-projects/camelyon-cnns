@@ -472,8 +472,13 @@ def main():
     json_log['final_model']['auc_val'] = auc_val
 
     def default(o):
-        if isinstance(o, np.int64): return int(o)  
-        raise TypeError
+        if isinstance(o, np.int64): return int(o)
+        if isinstance(o, np.int32): return int(o)
+        if isinstance(o, np.int16): return int(o)
+        if isinstance(o, np.float64): return float(o)
+        if isinstance(o, np.float32): return float(o)
+        if isinstance(o, np.float16): return float(o)
+        return None
 
     with open(LOG, 'w') as fp:
         json.dump(json_log, fp, default=default)
